@@ -1,30 +1,56 @@
+import {service} from '@loopback/core';
 import {
   Count,
   CountSchema,
   Filter,
   FilterExcludingWhere,
   repository,
-  Where,
+  Where
 } from '@loopback/repository';
 import {
-  post,
-  param,
-  get,
-  getModelSchemaRef,
-  patch,
-  put,
-  del,
-  requestBody,
-  response,
+  del, get,
+  getModelSchemaRef, HttpErrors, param, patch, post, put, requestBody,
+  response
 } from '@loopback/rest';
-import {Persona} from '../models';
+import {llaves} from '../config/llaves';
+import {Credenciales, Persona} from '../models';
 import {PersonaRepository} from '../repositories';
+import {AutenticacionService} from '../services';
+const fetch = require("node-fetch");
 
 export class PersonaController {
   constructor(
     @repository(PersonaRepository)
     public personaRepository : PersonaRepository,
+    @service(AutenticacionService)
+    public autenticarpersona:AutenticacionService
   ) {}
+
+  @post('/identificarPersona',{
+    responses:{
+      '200':{
+        description:'Identificación de usuarios'
+      }
+    }
+  })
+  async identificarPersona(
+    @requestBody() credenciales : Credenciales
+  ){
+    let p=await this.autenticarpersona.identificarPersona(credenciales.usuario,credenciales.clave);
+    if (p){
+      let token=this.autenticarpersona.generarTokenJWT(p);
+      return{
+        datos:{
+          nombre:p.nombre,
+          correo:p.correo,
+          id:p.id
+        },
+        tk:token
+      }
+    }else{
+      throw new HttpErrors[401]("Datos invalidos");
+    }
+  }
 
   @post('/personas')
   @response(200, {
@@ -44,7 +70,21 @@ export class PersonaController {
     })
     persona: Omit<Persona, 'id'>,
   ): Promise<Persona> {
-    return this.personaRepository.create(persona);
+
+    let clave = this.autenticarpersona.GenerarClave();
+    let claveCifrada = this.autenticarpersona.CifrarClave(clave);
+    persona.clave=claveCifrada;
+    let p= await this.personaRepository.create(persona);
+
+    //Notificar al Ususario.
+    let destino=persona.correo;
+    let asunto='Registro en la Plataforma';
+    let mensaje=`Hola ${persona.nombre}, su usuario es: ${persona.correo} y su contraseña es: ${clave}`;
+    fetch(`${llaves.urlServicioNotificaciones}/Correo?destino=${destino}&asunto=${asunto}&mensaje=${mensaje}`)
+    .then ((data:any)=>{
+      console.log(data);
+    })
+    return p;
   }
 
   @get('/personas/count')
